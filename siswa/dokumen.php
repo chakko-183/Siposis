@@ -10,12 +10,14 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = $_SESSION['user_id'];
 $success_message = '';
 $error_message = '';
+$show_registration_modal = false; // Flag untuk menampilkan modal
 
 // Ambil siswa_id dari user_id
 $stmt = $pdo->prepare("SELECT s.id, s.nis, s.kelas, s.jurusan, u.nama_lengkap FROM siswa s JOIN users u ON s.user_id = u.id WHERE s.user_id = ?");
 $stmt->execute([$user_id]);
 $siswa = $stmt->fetch();
 if (!$siswa) {
+    // Fallback, seharusnya tidak terjadi jika login berhasil
     die("Data siswa tidak ditemukan.");
 }
 
@@ -25,22 +27,26 @@ $nis_siswa = $siswa['nis'];
 $kelas_siswa = $siswa['kelas'];
 $jurusan_siswa = $siswa['jurusan'];
 
-// Ambil pendaftaran_id dari siswa_id
-$stmt = $pdo->prepare("SELECT id FROM pendaftaran_osis WHERE siswa_id = ?");
+// Ambil pendaftaran_id dan status pendaftaran dari siswa_id
+$stmt = $pdo->prepare("SELECT id, status_pendaftaran FROM pendaftaran_osis WHERE siswa_id = ?");
 $stmt->execute([$siswa_id]);
 $pendaftaran = $stmt->fetch();
-if (!$pendaftaran) {
-    die("Data pendaftaran belum dibuat. Silakan lengkapi data pendaftaran terlebih dahulu.");
+
+// Cek apakah pendaftaran belum dibuat atau statusnya masih 'draft'
+if (!$pendaftaran || $pendaftaran['status_pendaftaran'] === 'draft') {
+    $show_registration_modal = true; // Set flag untuk menampilkan modal
+    $pendaftaran_id = null; // Pastikan pendaftaran_id null jika modal aktif
+    $uploaded_files = []; // Pastikan ini kosong agar tidak ada error di loop bawah
+} else {
+    $pendaftaran_id = $pendaftaran['id'];
+
+    // Ambil dokumen yang sudah diupload (Hanya jika pendaftaran sudah lengkap)
+    $stmt = $pdo->prepare("SELECT jenis_dokumen, nama_file FROM dokumen WHERE pendaftaran_id = ?");
+    $stmt->execute([$pendaftaran_id]);
+    $uploaded_files = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
 }
 
-$pendaftaran_id = $pendaftaran['id'];
-
-// Cek dokumen yang sudah diupload
-$stmt = $pdo->prepare("SELECT jenis_dokumen, nama_file FROM dokumen WHERE pendaftaran_id = ?");
-$stmt->execute([$pendaftaran_id]);
-$uploaded_files = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-
-// Array untuk melacak dokumen yang sudah diupload
+// Array untuk melacak dokumen yang sudah diupload (default kosong jika modal aktif)
 $uploaded_docs = [
     'surat_izin' => isset($uploaded_files['surat_izin']),
     'pas_foto' => isset($uploaded_files['pas_foto']),
@@ -55,8 +61,8 @@ if (!file_exists($upload_dir)) {
     mkdir($upload_dir, 0777, true);
 }
 
-// Proses upload dokumen
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
+// Proses upload dokumen hanya jika pendaftaran sudah lengkap dan modal tidak ditampilkan
+if (!$show_registration_modal && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
     $jenis_dokumen = $_POST['jenis_dokumen'];
     $allowed_extensions = ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'];
     $max_file_size = 5 * 1024 * 1024; // 5MB
@@ -378,32 +384,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
                 gap: 1rem;
             }
         }
+        /* Tambahan untuk styling modal agar mirip gambar */
+        .custom-modal-header {
+            background: linear-gradient(135deg, #FF6B6B 0%, #FFA500 100%); /* Warna orange/merah */
+            color: white;
+            border-top-left-radius: 15px;
+            border-top-right-radius: 15px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .custom-modal-header i {
+            font-size: 3.5rem; /* Ukuran ikon */
+            margin-bottom: 0.5rem;
+        }
+        .custom-modal-content {
+            border-radius: 15px;
+            overflow: hidden; /* Agar border-radius diterapkan ke header */
+        }
+        .custom-modal-body {
+            padding: 2rem;
+            text-align: center;
+        }
+        .custom-modal-footer {
+            border-top: none;
+            padding: 1.5rem;
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+        }
+        .btn-modal-action {
+            padding: 0.75rem 2rem;
+            border-radius: 10px;
+            font-weight: 600;
+            min-width: 150px;
+        }
+        .btn-modal-primary {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%); /* Hijau */
+            color: white;
+            border: none;
+        }
+        .btn-modal-primary:hover {
+            opacity: 0.9;
+            color: white;
+        }
+        .btn-modal-secondary {
+            background-color: #6c757d; /* Abu-abu */
+            color: white;
+            border: none;
+        }
+        .btn-modal-secondary:hover {
+            opacity: 0.9;
+            color: white;
+        }
+        /* Sembunyikan konten utama jika modal harus muncul */
+        body.modal-open .main-content {
+            filter: blur(5px);
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
     <div class="container-fluid">
         <div class="row">
-            <!-- Sidebar -->
             <div class="col-md-3 col-lg-2 px-0">
                 <?php include 'sidebar.php'; ?>
             </div>
             
-            <!-- Main Content -->
             <div class="col-md-9 col-lg-10">
                 <div class="main-content p-4">
-                    <!-- Page Header -->
+                    <?php if ($show_registration_modal): ?>
+                        <div style="display:none;">
+                    <?php endif; ?>
+
                     <div class="page-header">
                         <h2><i class="fas fa-upload me-3"></i>Upload Dokumen Pendaftaran</h2>
                         <p>Selamat datang, <?= htmlspecialchars($nama_siswa) ?> - NIS: <?= htmlspecialchars($nis_siswa) ?> (<?= htmlspecialchars($kelas_siswa) ?> <?= htmlspecialchars($jurusan_siswa) ?>)</p>
                     </div>
 
                     <?php
-                    $uploaded_count = array_sum($uploaded_docs);
-                    $total_docs = count($uploaded_docs);
+                    // Pastikan variabel ini terdefinisi bahkan jika $pendaftaran_id null
+                    $uploaded_count = (isset($uploaded_docs) && is_array($uploaded_docs)) ? array_sum($uploaded_docs) : 0;
+                    $total_docs = (isset($uploaded_docs) && is_array($uploaded_docs)) ? count($uploaded_docs) : 5; // Asumsi ada 5 jenis dokumen
                     $progress = $total_docs > 0 ? ($uploaded_count / $total_docs) * 100 : 0;
                     ?>
                     
-                    <!-- Progress Section -->
                     <div class="progress-section">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <h5 class="mb-0">Progress Upload</h5>
@@ -415,7 +479,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
                         <small class="text-muted mt-1 d-block"><?= round($progress) ?>% dokumen telah diupload</small>
                     </div>
 
-                    <!-- Messages -->
                     <?php if ($success_message): ?>
                         <div class="alert alert-success">
                             <i class="fas fa-check-circle me-2"></i><?= $success_message ?>
@@ -428,125 +491,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
                         </div>
                     <?php endif; ?>
 
-                    <!-- Document Upload Grid -->
                     <div class="document-grid">
-                        <!-- Surat Izin Orang Tua -->
-                        <div class="document-card <?= $uploaded_docs['surat_izin'] ? 'uploaded' : '' ?>">
-                            <?php if ($uploaded_docs['surat_izin']): ?>
+                        <?php
+                        $document_types = [
+                            'surat_izin' => ['title' => 'Surat Izin Orang Tua', 'desc' => 'Surat persetujuan dari orang tua/wali untuk mengikuti kegiatan OSIS.', 'format' => 'PDF, DOC, DOCX', 'icon' => 'fas fa-file-signature', 'accept' => '.pdf,.doc,.docx'],
+                            'pas_foto' => ['title' => 'Pas Foto', 'desc' => 'Foto formal dengan latar belakang merah atau biru, ukuran 3x4 cm.', 'format' => 'JPG, PNG', 'icon' => 'fas fa-camera', 'accept' => 'image/jpeg,image/jpg,image/png'],
+                            'nilai_rapor' => ['title' => 'Nilai Rapor', 'desc' => 'Fotokopi rapor semester terakhir yang telah dilegalisir.', 'format' => 'PDF, JPG, PNG', 'icon' => 'fas fa-graduation-cap', 'accept' => '.pdf,image/jpeg,image/jpg,image/png'],
+                            'sertifikat' => ['title' => 'Sertifikat Prestasi', 'desc' => 'Sertifikat prestasi akademik atau non-akademik (jika ada).', 'format' => 'PDF, JPG, PNG', 'icon' => 'fas fa-certificate', 'accept' => '.pdf,image/jpeg,image/jpg,image/png'],
+                            'rekomendasi' => ['title' => 'Surat Rekomendasi', 'desc' => 'Surat rekomendasi dari guru atau kepala sekolah.', 'format' => 'PDF, DOC, DOCX', 'icon' => 'fas fa-envelope', 'accept' => '.pdf,.doc,.docx'],
+                        ];
+                        foreach ($document_types as $type => $data):
+                        ?>
+                        <div class="document-card <?= $uploaded_docs[$type] ? 'uploaded' : '' ?>">
+                            <?php if ($uploaded_docs[$type]): ?>
                                 <div class="uploaded-badge"><i class="fas fa-check"></i> Uploaded</div>
                             <?php endif; ?>
                             <div class="document-icon">
-                                <i class="fas fa-file-signature"></i>
+                                <i class="<?= $data['icon'] ?>"></i>
                             </div>
-                            <h4 class="document-title">Surat Izin Orang Tua</h4>
+                            <h4 class="document-title"><?= $data['title'] ?></h4>
                             <p class="document-description">
-                                Surat persetujuan dari orang tua/wali untuk mengikuti kegiatan OSIS.<br>
-                                <small><strong>Format:</strong> PDF, DOC, DOCX | <strong>Maks:</strong> 5MB</small>
+                                <?= $data['desc'] ?><br>
+                                <small><strong>Format:</strong> <?= $data['format'] ?> | <strong>Maks:</strong> 5MB</small>
                             </p>
                             <form method="POST" enctype="multipart/form-data" style="display: inline;">
-                                <input type="hidden" name="jenis_dokumen" value="surat_izin">
-                                <input type="file" name="dokumen" class="file-input" id="surat_izin" accept=".pdf,.doc,.docx" onchange="this.form.submit()">
-                                <button type="button" class="upload-btn" onclick="document.getElementById('surat_izin').click()">
+                                <input type="hidden" name="jenis_dokumen" value="<?= $type ?>">
+                                <input type="file" name="dokumen" class="file-input" id="<?= $type ?>" accept="<?= $data['accept'] ?>" onchange="this.form.submit()">
+                                <button type="button" class="upload-btn" onclick="document.getElementById('<?= $type ?>').click()" <?= $show_registration_modal ? 'disabled' : '' ?>>
                                     <i class="fas fa-upload me-2"></i>
-                                    <?= $uploaded_docs['surat_izin'] ? 'Ganti File' : 'Upload File' ?>
+                                    <?= $uploaded_docs[$type] ? 'Ganti File' : 'Upload File' ?>
                                 </button>
                             </form>
                         </div>
-
-                        <!-- Pas Foto -->
-                        <div class="document-card <?= $uploaded_docs['pas_foto'] ? 'uploaded' : '' ?>">
-                            <?php if ($uploaded_docs['pas_foto']): ?>
-                                <div class="uploaded-badge"><i class="fas fa-check"></i> Uploaded</div>
-                            <?php endif; ?>
-                            <div class="document-icon">
-                                <i class="fas fa-camera"></i>
-                            </div>
-                            <h4 class="document-title">Pas Foto</h4>
-                            <p class="document-description">
-                                Foto formal dengan latar belakang merah atau biru, ukuran 3x4 cm.<br>
-                                <small><strong>Format:</strong> JPG, PNG | <strong>Maks:</strong> 2MB</small>
-                            </p>
-                            <form method="POST" enctype="multipart/form-data" style="display: inline;">
-                                <input type="hidden" name="jenis_dokumen" value="pas_foto">
-                                <input type="file" name="dokumen" class="file-input" id="pas_foto" accept="image/jpeg,image/jpg,image/png" onchange="this.form.submit()">
-                                <button type="button" class="upload-btn" onclick="document.getElementById('pas_foto').click()">
-                                    <i class="fas fa-upload me-2"></i>
-                                    <?= $uploaded_docs['pas_foto'] ? 'Ganti File' : 'Upload File' ?>
-                                </button>
-                            </form>
-                        </div>
-
-                        <!-- Nilai Rapor -->
-                        <div class="document-card <?= $uploaded_docs['nilai_rapor'] ? 'uploaded' : '' ?>">
-                            <?php if ($uploaded_docs['nilai_rapor']): ?>
-                                <div class="uploaded-badge"><i class="fas fa-check"></i> Uploaded</div>
-                            <?php endif; ?>
-                            <div class="document-icon">
-                                <i class="fas fa-graduation-cap"></i>
-                            </div>
-                            <h4 class="document-title">Nilai Rapor</h4>
-                            <p class="document-description">
-                                Fotokopi rapor semester terakhir yang telah dilegalisir.<br>
-                                <small><strong>Format:</strong> PDF, JPG, PNG | <strong>Maks:</strong> 5MB</small>
-                            </p>
-                            <form method="POST" enctype="multipart/form-data" style="display: inline;">
-                                <input type="hidden" name="jenis_dokumen" value="nilai_rapor">
-                                <input type="file" name="dokumen" class="file-input" id="nilai_rapor" accept=".pdf,image/jpeg,image/jpg,image/png" onchange="this.form.submit()">
-                                <button type="button" class="upload-btn" onclick="document.getElementById('nilai_rapor').click()">
-                                    <i class="fas fa-upload me-2"></i>
-                                    <?= $uploaded_docs['nilai_rapor'] ? 'Ganti File' : 'Upload File' ?>
-                                </button>
-                            </form>
-                        </div>
-
-                        <!-- Sertifikat -->
-                        <div class="document-card <?= $uploaded_docs['sertifikat'] ? 'uploaded' : '' ?>">
-                            <?php if ($uploaded_docs['sertifikat']): ?>
-                                <div class="uploaded-badge"><i class="fas fa-check"></i> Uploaded</div>
-                            <?php endif; ?>
-                            <div class="document-icon">
-                                <i class="fas fa-certificate"></i>
-                            </div>
-                            <h4 class="document-title">Sertifikat Prestasi</h4>
-                            <p class="document-description">
-                                Sertifikat prestasi akademik atau non-akademik (jika ada).<br>
-                                <small><strong>Format:</strong> PDF, JPG, PNG | <strong>Maks:</strong> 5MB</small>
-                            </p>
-                            <form method="POST" enctype="multipart/form-data" style="display: inline;">
-                                <input type="hidden" name="jenis_dokumen" value="sertifikat">
-                                <input type="file" name="dokumen" class="file-input" id="sertifikat" accept=".pdf,image/jpeg,image/jpg,image/png" onchange="this.form.submit()">
-                                <button type="button" class="upload-btn" onclick="document.getElementById('sertifikat').click()">
-                                    <i class="fas fa-upload me-2"></i>
-                                    <?= $uploaded_docs['sertifikat'] ? 'Ganti File' : 'Upload File' ?>
-                                </button>
-                            </form>
-                        </div>
-
-                        <!-- Surat Rekomendasi -->
-                        <div class="document-card <?= $uploaded_docs['rekomendasi'] ? 'uploaded' : '' ?>">
-                            <?php if ($uploaded_docs['rekomendasi']): ?>
-                                <div class="uploaded-badge"><i class="fas fa-check"></i> Uploaded</div>
-                            <?php endif; ?>
-                            <div class="document-icon">
-                                <i class="fas fa-envelope"></i>
-                            </div>
-                            <h4 class="document-title">Surat Rekomendasi</h4>
-                            <p class="document-description">
-                                Surat rekomendasi dari guru atau kepala sekolah.<br>
-                                <small><strong>Format:</strong> PDF, DOC, DOCX | <strong>Maks:</strong> 5MB</small>
-                            </p>
-                            <form method="POST" enctype="multipart/form-data" style="display: inline;">
-                                <input type="hidden" name="jenis_dokumen" value="rekomendasi">
-                                <input type="file" name="dokumen" class="file-input" id="rekomendasi" accept=".pdf,.doc,.docx" onchange="this.form.submit()">
-                                <button type="button" class="upload-btn" onclick="document.getElementById('rekomendasi').click()">
-                                    <i class="fas fa-upload me-2"></i>
-                                    <?= $uploaded_docs['rekomendasi'] ? 'Ganti File' : 'Upload File' ?>
-                                </button>
-                            </form>
-                        </div>
+                        <?php endforeach; ?>
                     </div>
 
-                    <!-- Requirements Section -->
                     <div class="requirements-section">
                         <h4 class="requirements-title">
                             <i class="fas fa-info-circle"></i>
@@ -561,7 +540,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
                         </ul>
                     </div>
 
-                    <!-- Navigation Buttons -->
                     <div class="navigation-buttons">
                         <a href="dashboard.php" class="nav-btn btn-secondary">
                             <i class="fas fa-arrow-left me-2"></i>Kembali ke Dashboard
@@ -576,6 +554,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
                             </span>
                         <?php endif; ?>
                     </div>
+
+                    <?php if ($show_registration_modal): ?>
+                        </div> <?php endif; ?>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="registrationRequiredModal" tabindex="-1" aria-labelledby="registrationRequiredModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content custom-modal-content">
+                <div class="custom-modal-header">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h5 class="modal-title fs-4" id="registrationRequiredModalLabel">Pendaftaran Belum Lengkap!</h5>
+                </div>
+                <div class="modal-body custom-modal-body">
+                    <p class="fs-6">Anda harus menyelesaikan formulir pendaftaran terlebih dahulu sebelum dapat mengunggah dokumen.</p>
+                </div>
+                <div class="custom-modal-footer">
+                    <a href="pendaftaran.php" class="btn btn-modal-primary btn-modal-action">
+                        <i class="fas fa-file-alt me-2"></i>Lengkapi Pendaftaran
+                    </a>
+                    <button type="button" class="btn btn-modal-secondary btn-modal-action" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>Tutup
+                    </button>
                 </div>
             </div>
         </div>
@@ -604,6 +608,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jenis_dokumen'])) {
                         return;
                     }
                 }
+            });
+        });
+
+        // JavaScript untuk menampilkan modal jika flag $show_registration_modal true
+        document.addEventListener('DOMContentLoaded', function() {
+            <?php if ($show_registration_modal): ?>
+                var myModal = new bootstrap.Modal(document.getElementById('registrationRequiredModal'), {
+                    backdrop: 'static', // Mencegah modal tertutup saat klik di luar
+                    keyboard: false      // Mencegah modal tertutup saat tekan Esc
+                });
+                myModal.show();
+                // Tambahkan kelas ke body untuk efek blur pada konten belakang
+                document.body.classList.add('modal-open');
+            <?php endif; ?>
+
+            // Hapus kelas modal-open dari body ketika modal ditutup
+            var registrationModal = document.getElementById('registrationRequiredModal');
+            registrationModal.addEventListener('hidden.bs.modal', function () {
+                document.body.classList.remove('modal-open');
             });
         });
     </script>

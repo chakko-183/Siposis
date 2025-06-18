@@ -140,7 +140,7 @@ if (is_logged_in()) {
                 </div>
                 
                 <!-- Demo Login Info -->
-                <div class="mt-4 text-center text-white">
+                <!-- <div class="mt-4 text-center text-white">
                     <div class="card bg-transparent border-light">
                         <div class="card-body">
                             <h6 class="text-white">Demo Login:</h6>
@@ -148,7 +148,7 @@ if (is_logged_in()) {
                             <p class="mb-0"><strong>Siswa:</strong> Daftar akun baru</p>
                         </div>
                     </div>
-                </div>
+                </div> -->
             </div>
         </div>
     </div>
